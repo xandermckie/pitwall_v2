@@ -1,67 +1,42 @@
-# PITWALL — F1 Strategy Evaluator & Race Visualiser
+![Python](https://img.shields.io/badge/Python-3.12+-blue)
+![Flask](https://img.shields.io/badge/Flask-3.0-red)
+![NumPy](https://img.shields.io/badge/NumPy-enabled-green)
+![License](https://img.shields.io/badge/License-MIT-gray)
 
-A full-stack F1 race strategy tool. Python/Flask backend runs the simulation engine, the browser animates the race live.
+# PITWALL — F1 Strategy Evaluator & Live Race Visualiser
 
-## Architecture
+A full-stack F1 race strategy tool. Define your team's tyre strategy, 
+grid position, and weather conditions — then watch the predicted race 
+unfold lap by lap in the browser.
 
-```
-pitwall/
-├── app.py              ← Flask server + Python simulation engine
-├── requirements.txt    ← Python dependencies
-├── templates/
-│   └── index.html      ← Main HTML app shell
-└── static/
-    ├── css/
-    │   └── style.css   ← White & navy design system
-    └── js/
-        ├── app.js      ← Main controller, API calls, playback
-        ├── track.js    ← Canvas track drawing
-        └── charts.js   ← Live mini charts
-```
+Python/Flask runs the simulation engine. The browser animates it.
 
-## Setup
+## Features
+- **Monte Carlo simulation** — tyre degradation, safety car probability, rival strategy variation
+- **Live race visualiser** — animated car positions on circuit-accurate track maps
+- **Strategy builder** — define compounds, stint lengths, pit windows
+- **Timing tower** — all 20 cars live with gaps, compounds, and position changes
+- **Events log** — pit stops, overtakes, safety car, rain, fastest laps
 
-**1. Install Python dependencies:**
+## Quick start
 ```bash
 pip install flask flask-cors numpy
-```
-
-**2. Start the server:**
-```bash
 cd pitwall
-python app.py
+py app.py
+# Open http://localhost:5000
 ```
 
-**3. Open your browser:**
-```
-http://localhost:5000
-```
+## API
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/races` | 2025 race calendar |
+| GET | `/api/teams` | Teams, drivers, pace data |
+| GET | `/api/standings` | Championship standings |
+| POST | `/api/simulate` | Run simulation → lap-by-lap JSON |
 
-## How it works
+## Stack
+Python · Flask · NumPy · Canvas 2D · requestAnimationFrame · Vanilla JS
 
-1. Browser loads the page and calls `/api/races`, `/api/teams`, `/api/tyre_model` to populate the form
-2. User configures their strategy (team, grid position, stints, weather)
-3. On launch, browser POSTs to `/api/simulate` — Python runs the full Monte Carlo simulation
-4. Flask returns the complete lap-by-lap race data as JSON (all 20 cars, every lap)
-5. Browser animates the race in real time using Canvas 2D
-
-## API Endpoints
-
-| Method | Route          | Description                        |
-|--------|----------------|------------------------------------|
-| GET    | `/`            | Serves the frontend HTML           |
-| GET    | `/api/races`   | List of 2025 races                 |
-| GET    | `/api/teams`   | Teams, drivers, colours            |
-| GET    | `/api/standings` | 2025 championship standings      |
-| GET    | `/api/tyre_model` | Tyre compound characteristics   |
-| POST   | `/api/simulate` | Run race simulation → lap data   |
-
-## Simulation Engine
-
-The Python engine (`app.py`) models:
-- Tyre degradation across 3 phases: peak window → linear → cliff
-- Safety car deployment with configurable probability
-- Rain events and wrong-compound penalties
-- Pit stop timing with ±jitter for rivals
-- Team pace differentials from 2025 season data
-- Monte Carlo randomness on pace, pit stops, and strategy variation
+---
+*Unofficial project — not affiliated with Formula 1 or FIA.*
+*F1, FORMULA ONE and related marks are trade marks of Formula One Licensing B.V.*

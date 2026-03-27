@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PITWALL · F1 Strategy Evaluator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;600;700;900&family=Barlow:wght@300;400;500;600&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ============================================================
+     SETUP SCREEN — Shown before race starts.
+     Populated from /api/races and /api/teams on page load.
+     ============================================================ -->
+<div id="setup-screen">
+  <div class="setup-box">
+
+    <div class="setup-logo">
+      <div class="logo-chevron"></div>
+      <div>
+        <div class="setup-title">PITWALL</div>
+        <div class="setup-sub">F1 STRATEGY EVALUATOR · 2025 SEASON</div>
+      </div>
+    </div>
+
+    <!-- API connection status -->
+    <div id="api-status" class="api-status loading">
+      <span class="status-dot"></span>
+      <span id="api-status-text">Connecting to Python server...</span>
+    </div>
+
+    <div class="form-grid">
+
+      <div class="form-group">
+        <label class="form-label">Grand Prix</label>
+        <select class="form-select" id="cfg-race">
+          <option value="">Loading races...</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Your Team</label>
+        <select class="form-select" id="cfg-team" onchange="onTeamChange()">
+          <option value="">Loading teams...</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Grid Position</label>
+        <input class="form-input" type="number" id="cfg-grid" min="1" max="20" value="2">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Weather Conditions</label>
+        <select class="form-select" id="cfg-weather">
+          <option value="DRY">Dry</option>
+          <option value="MIXED">Mixed / Changeable</option>
+          <option value="WET">Wet</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Safety Car Expected?</label>
+        <select class="form-select" id="cfg-sc">
+          <option value="false">No</option>
+          <option value="true">Yes — plan for it</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Simulation Playback Speed</label>
+        <select class="form-select" id="cfg-speed">
+          <option value="900">Slow (0.9s / lap)</option>
+          <option value="400" selected>Normal (0.4s / lap)</option>
+          <option value="120">Fast (0.12s / lap)</option>
+          <option value="30">Ultra</option>
+        </select>
+      </div>
+
+    </div>
+
+    <!-- Stint builder — dynamically generated -->
+    <div class="form-group" style="margin-bottom:16px">
+      <label class="form-label">Pit Stop Count</label>
+      <select class="form-select" id="cfg-stops" onchange="buildStintUI()">
+        <option value="1">1 Stop — 2 stints</option>
+        <option value="2" selected>2 Stops — 3 stints</option>
+        <option value="3">3 Stops — 4 stints</option>
+      </select>
+    </div>
+
+    <div id="stint-builder" class="stint-builder"></div>
+
+    <!-- Drivers preview (updates on team change) -->
+    <div id="driver-preview" class="driver-preview"></div>
+
+    <button class="launch-btn" id="launch-btn" onclick="launchRace()" disabled>
+      <span id="launch-text">▶ LAUNCH RACE SIMULATION</span>
+    </button>
+
+  </div>
+</div>
+
+<!-- ============================================================
+     FINISH OVERLAY
+     ============================================================ -->
+<div id="finish-overlay">
+  <div class="finish-inner">
+    <div class="finish-flag">🏁</div>
+    <div class="finish-title">CHEQUERED FLAG</div>
+    <div id="finish-result" class="finish-result"></div>
+    <div id="podium-cards" class="podium-row"></div>
+    <div id="finish-stats" class="finish-stats"></div>
+    <button class="launch-btn" onclick="resetApp()" style="max-width:300px;margin-top:16px">
+      ↺ NEW STRATEGY
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================
+     HEADER BAR
+     ============================================================ -->
+<header id="app-header">
+  <div class="logo">
+    <div class="logo-chevron"></div>
+    <div>
+      <div class="logo-text">PITWALL</div>
+      <div class="logo-sub">Race Visualiser · Python Engine</div>
+    </div>
+  </div>
+
+  <div id="sc-banner" class="sc-banner hidden">
+    <span>⚠</span>&nbsp; SAFETY CAR DEPLOYED
+  </div>
+
+  <div class="hdr-right">
+    <div class="speed-ctrl">
+      <span class="ctrl-label">SPEED</span>
+      <select class="speed-select" id="speed-live" onchange="updateSpeed()">
+        <option value="900">Slow</option>
+        <option value="400" selected>Normal</option>
+        <option value="120">Fast</option>
+        <option value="30">Ultra</option>
+      </select>
+    </div>
+    <button class="btn btn-ghost" id="pause-btn" onclick="togglePause()" disabled>⏸ PAUSE</button>
+    <button class="btn btn-danger" onclick="resetApp()">↺ RESET</button>
+  </div>
+</header>
+
+<!-- ============================================================
+     RACE INFO STRIP
+     ============================================================ -->
+<div id="info-strip">
+  <div class="strip-item">
+    <span class="strip-label">LAP</span>
+    <span class="strip-val" id="si-lap">—</span>
+    <span class="strip-label" id="si-total">/ —</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">LEADER</span>
+    <span class="strip-val" id="si-leader">—</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">YOUR P1 DRIVER</span>
+    <span class="strip-val" id="si-pos">—</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">GAP</span>
+    <span class="strip-val" id="si-gap">—</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">COMPOUND</span>
+    <span class="strip-val" id="si-tyre">—</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">TYRE AGE</span>
+    <span class="strip-val" id="si-age">—</span>
+  </div>
+  <div class="strip-item">
+    <span class="strip-label">FL</span>
+    <span class="strip-val green" id="si-fl">—</span>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN 3-COLUMN LAYOUT
+     ============================================================ -->
+<div id="main-layout">
+
+  <!-- LEFT: Timing Tower -->
+  <aside id="timing-tower">
+    <div class="panel-hdr">▸ TIMING TOWER</div>
+    <div id="tower-body"></div>
+  </aside>
+
+  <!-- CENTRE: Track + Bottom charts -->
+  <section id="centre">
+    <div id="track-wrap">
+      <canvas id="track-canvas"></canvas>
+      <!-- Loading overlay shown while Python computes the race -->
+      <div id="compute-overlay" class="compute-overlay hidden">
+        <div class="compute-spinner"></div>
+        <div class="compute-text">Python computing race simulation...</div>
+        <div class="compute-sub" id="compute-sub">Running lap-by-lap engine</div>
+      </div>
+    </div>
+
+    <!-- Bottom mini charts -->
+    <div id="chart-strip">
+      <div class="chart-box">
+        <div class="chart-label">▸ GAP TO LEADER (s)</div>
+        <canvas id="gap-chart"></canvas>
+      </div>
+      <div class="chart-box">
+        <div class="chart-label">▸ TYRE DEGRADATION DELTA (s)</div>
+        <canvas id="deg-chart"></canvas>
+      </div>
+      <div class="chart-box">
+        <div class="chart-label">▸ LAP TIME TREND (s)</div>
+        <canvas id="lap-chart"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Strategy + Events -->
+  <aside id="right-panel">
+
+    <div class="panel-hdr">▸ STRATEGY</div>
+    <div id="strategy-block">
+      <div class="form-label" style="margin-bottom:8px;padding:0 14px">STINT PLAN</div>
+      <div id="stint-viz-bar" class="stint-viz-bar"></div>
+      <div id="pit-notes" class="pit-notes"></div>
+    </div>
+
+    <div class="panel-hdr">▸ YOUR DRIVERS</div>
+    <div id="driver-cards"></div>
+
+    <div class="panel-hdr">▸ RACE EVENTS</div>
+    <div id="events-log"></div>
+
+  </aside>
+
+</div>
+
+<!-- Load JS modules -->
+<script src="/static/js/track.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/app.js"></script>
+
+</body>
+</html>

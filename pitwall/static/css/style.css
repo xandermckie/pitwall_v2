@@ -786,6 +786,98 @@ body {
 .ev-text { font-family:var(--font-body); font-size:11px; color:var(--slate-light); line-height:1.4; }
 .ev-text strong { color:var(--white); font-weight:600; }
 
+/* ============================================================
+   LAP SCRUBBER
+   ============================================================ */
+#scrubber-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 18px;
+  background: var(--navy-mid);
+  border-top: 1px solid var(--navy-border);
+  flex-shrink: 0;
+}
+
+.scrub-lap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--slate-light);
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+}
+.scrub-lap.scrub-max { color: var(--slate); }
+
+#lap-scrubber {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--navy-light);
+  outline: none;
+  cursor: pointer;
+}
+#lap-scrubber:disabled { opacity: .4; cursor: not-allowed; }
+#lap-scrubber:focus-visible { box-shadow: 0 0 0 2px var(--blue-acc); }
+
+/* Range thumb — F1 red marker, large enough to grab */
+#lap-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid var(--white);
+  cursor: pointer;
+  transition: transform .12s ease, background .12s ease;
+}
+#lap-scrubber::-webkit-slider-thumb:hover { transform: scale(1.18); background: var(--red-bright); }
+#lap-scrubber::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid var(--white);
+  cursor: pointer;
+}
+
+/* ============================================================
+   DRS PILL + FOLLOWED-DRIVER ROW
+   ============================================================ */
+.drs-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--navy);
+  background: var(--inter);
+  border-radius: 2px;
+  vertical-align: middle;
+  animation: drsFlash 1s infinite;
+}
+@keyframes drsFlash { 0%,100%{opacity:1} 50%{opacity:.55} }
+
+.t-row { cursor: pointer; }
+.t-row.focused {
+  background: rgba(255,255,255,.10);
+  box-shadow: inset 3px 0 0 var(--white);
+}
+.t-row:focus-visible { outline: 2px solid var(--blue-acc); outline-offset: -2px; }
+
+/* Tabular figures so timing numbers don't shift width as they change */
+.t-pos, .t-gap, .strip-val, .dc-pos, .dc-laptime, .fs-val { font-variant-numeric: tabular-nums; }
+
+/* Respect reduced-motion: drop the looping/decorative animations */
+@media (prefers-reduced-motion: reduce) {
+  .drs-pill, .sc-banner, .api-status.loading .status-dot { animation: none; }
+  .ev, .podium-card, .finish-flag { animation: none; }
+  * { scroll-behavior: auto; }
+}
+
 /* Utilities */
 .hidden { display: none !important; }
 .green  { color: var(--green); }

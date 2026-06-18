@@ -22,6 +22,8 @@ let playbackIdx  = 0;     // Current lap index into RACE_DATA.laps
 let playTimer    = null;  // setInterval handle
 let isPaused     = false;
 let lapSpeed     = 400;   // ms between laps
+let focusId      = null;  // car id the user clicked to follow on track (null = none)
+let scrubbing    = false; // true while user is dragging the lap scrubber
 
 // Track which events we've already logged (prevents duplicates)
 const loggedEvents = new Set();
@@ -57,6 +59,7 @@ async function bootstrap() {
     populateTeamSelect(teams);
     buildStintUI();
     chartsInit();
+    wireInteractions();
 
     setApiStatus('ok', `Python server connected · ${races.length} races · ${teams.length} teams loaded`);
     document.getElementById('launch-btn').disabled = false;
@@ -163,6 +166,44 @@ function buildStintUI() {
 }
 
 
+/**
+ * Wire up the interactive controls (lap scrubber + click-to-follow).
+ * Listeners are attached once to persistent parents, so they survive the
+ * timing tower's innerHTML re-renders via event delegation.
+ */
+function wireInteractions() {
+  // ── Lap scrubber: drag to jump anywhere, auto-pauses playback ──────────
+  const scrub = document.getElementById('lap-scrubber');
+  scrub.addEventListener('input', () => {
+    if (!RACE_DATA) return;
+    scrubbing = true;
+    isPaused  = true;
+    document.getElementById('pause-btn').textContent = '▶ RESUME';
+    const lap   = parseInt(scrub.value);
+    playbackIdx = lap - 1;                       // resume continues from here
+    renderLap(RACE_DATA.laps[lap - 1], { scrub: true });
+  });
+  scrub.addEventListener('change', () => { scrubbing = false; });
+
+  // ── Click a timing row to follow that driver on track (toggle) ─────────
+  const tower = document.getElementById('tower-body');
+  const follow = (e) => {
+    const row = e.target.closest('.t-row');
+    if (!row) return;
+    const id = parseInt(row.dataset.carId);
+    focusId  = (focusId === id) ? null : id;
+    trackSetFocus(focusId);
+    // Instant highlight feedback (next tower refresh rebuilds the class anyway)
+    document.querySelectorAll('.t-row.focused').forEach(r => r.classList.remove('focused'));
+    if (focusId !== null) row.classList.add('focused');
+  };
+  tower.addEventListener('click', follow);
+  tower.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); follow(e); }
+  });
+}
+
+
 // =============================================================================
 // LAUNCH — Collect config, POST to Python, start playback
 // =============================================================================
@@ -227,6 +268,18 @@ async function launchRace() {
 
     // Setup info strip total laps
     document.getElementById('si-total').textContent = `/ ${RACE_DATA.meta.total_laps}`;
+
+    // Setup lap scrubber
+    const scrub = document.getElementById('lap-scrubber');
+    scrub.min = 1;
+    scrub.max = RACE_DATA.laps.length;
+    scrub.value = 1;
+    scrub.disabled = false;
+    document.getElementById('scrub-max').textContent = `/ ${RACE_DATA.laps.length}`;
+
+    // Reset driver focus
+    focusId = null;
+    trackSetFocus(null);
 
     // Enable controls
     document.getElementById('pause-btn').disabled  = false;
@@ -297,20 +350,31 @@ function updateSpeed() {
  * Updates every UI panel with the current lap snapshot.
  * Heavy DOM updates (timing tower) are throttled to avoid layout thrashing.
  */
-function renderLap(snap) {
+function renderLap(snap, opts = {}) {
+  const scrub = opts.scrub === true;
+
   updateInfoStrip(snap);
 
   // Timing tower is the most expensive DOM update — throttle to every 3 laps
-  if (playbackIdx % 3 === 0) updateTimingTower(snap);
+  // during playback, but always refresh when scrubbing to a specific lap.
+  if (scrub || playbackIdx % 3 === 0) updateTimingTower(snap);
 
   updateDriverCards(snap);
   updateStintProgress(snap.lap, RACE_DATA.meta.stints, RACE_DATA.meta.total_laps);
 
   // Pass snap to track — RAF loop handles actual drawing at 60fps
-  trackDraw(snap);
+  trackDraw(snap, scrub);
 
-  updateLiveCharts(snap);
-  detectEvents(snap);
+  // Keep the scrubber in sync during normal playback (not while dragging)
+  if (!scrubbing) document.getElementById('lap-scrubber').value = snap.lap;
+  document.getElementById('scrub-cur').textContent = `L${snap.lap}`;
+
+  // Charts and events only advance during forward playback — scrubbing back and
+  // forth must not corrupt rolling chart history or spam the events log.
+  if (!scrub) {
+    updateLiveCharts(snap);
+    detectEvents(snap);
+  }
 
   // SC banner
   document.getElementById('sc-banner').classList.toggle('hidden', !snap.in_sc);
@@ -324,8 +388,7 @@ function renderLap(snap) {
 /** Info strip — lap counter, leader, user position, gap, tyre */
 function updateInfoStrip(snap) {
   const leader   = snap.cars[0];
-  const userCar  = snap.cars.find(c => c.is_user && c.driver === RACE_DATA.meta.stints && true) ||
-                   snap.cars.find(c => c.is_user);
+  const userCar  = snap.cars.find(c => c.is_user);
 
   document.getElementById('si-lap').textContent    = snap.lap;
   document.getElementById('si-leader').textContent = leader?.driver || '—';
@@ -360,20 +423,26 @@ function updateTimingTower(snap) {
     const tyre     = TYRE_META?.[car.compound];
     const tyreColor = tyre?.color || '#888';
     const tyreLabel = tyre?.label || '?';
-    const gapTxt   = pos === 1 ? 'LEAD' : `+${car.gap.toFixed(2)}`;
+    // Show interval to the car ahead (more dynamic than gap-to-leader).
+    const gapTxt   = pos === 1 ? 'LEADER' : `+${(car.interval ?? car.gap).toFixed(2)}`;
 
-    // Highlight: user car or gaining position
+    // Highlight: user car, followed car, or one gaining a position
     const wasPos  = prevPositions[car.driver];
     const gaining = wasPos && car.position < wasPos;
-    const rowCls  = car.is_user ? 'user-car' : gaining ? 'gaining' : '';
+    const rowCls  = [
+      car.is_user ? 'user-car' : '',
+      car.id === focusId ? 'focused' : '',
+      gaining ? 'gaining' : '',
+    ].filter(Boolean).join(' ');
     prevPositions[car.driver] = car.position;
 
     return `
-      <div class="t-row ${rowCls}">
+      <div class="t-row ${rowCls}" data-car-id="${car.id}" role="button" tabindex="0"
+           title="Click to follow ${car.driver} on track">
         <span class="t-pos ${posCls}">${pos}</span>
         <div class="t-bar" style="background:${car.color}"></div>
         <div class="t-info">
-          <div class="t-driver">${car.driver}</div>
+          <div class="t-driver">${car.driver}${car.drs ? '<span class="drs-pill">DRS</span>' : ''}</div>
           <div class="t-team">${car.team.toUpperCase()}</div>
         </div>
         <div class="t-tyre" style="background:${tyreColor}">${tyreLabel}</div>
@@ -604,6 +673,14 @@ function resetApp() {
   isPaused    = false;
   RACE_DATA   = null;
   playbackIdx = 0;
+  focusId     = null;
+  scrubbing   = false;
+
+  const scrub = document.getElementById('lap-scrubber');
+  scrub.disabled = true;
+  scrub.value = 0; scrub.max = 0;
+  document.getElementById('scrub-cur').textContent = 'L0';
+  document.getElementById('scrub-max').textContent = '/ 0';
 
   loggedEvents.clear();
   Object.keys(prevPositions).forEach(k => delete prevPositions[k]);

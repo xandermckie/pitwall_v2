@@ -208,6 +208,14 @@
       </div>
     </div>
 
+    <!-- Lap scrubber — drag to jump anywhere in the race -->
+    <div id="scrubber-bar">
+      <span class="scrub-lap" id="scrub-cur">L0</span>
+      <input type="range" id="lap-scrubber" min="0" max="0" value="0" step="1"
+             aria-label="Race lap timeline" disabled>
+      <span class="scrub-lap scrub-max" id="scrub-max">/ 0</span>
+    </div>
+
     <!-- Bottom mini charts -->
     <div id="chart-strip">
       <div class="chart-box">

@@ -12,10 +12,12 @@ unfold lap by lap in the browser.
 Python/Flask runs the simulation engine. The browser animates it.
 
 ## Features
-- **Monte Carlo simulation** — tyre degradation, safety car probability, rival strategy variation
-- **Live race visualiser** — animated car positions on circuit-accurate track maps
+- **Monte Carlo simulation** — tyre degradation, safety car probability, rival strategy variation, DRS battles, driver errors
+- **Live race visualiser** — cars circulate the circuit lap by lap, spaced by their real time gaps, on circuit-accurate track maps
+- **Lap scrubber** — drag the timeline to jump to any lap and inspect the race
+- **Follow any driver** — click a car in the timing tower to track them on the map
 - **Strategy builder** — define compounds, stint lengths, pit windows
-- **Timing tower** — all 20 cars live with gaps, compounds, and position changes
+- **Timing tower** — all 20 cars live with intervals, compounds, DRS, and position changes
 - **Events log** — pit stops, overtakes, safety car, rain, fastest laps
 
 ## Quick start

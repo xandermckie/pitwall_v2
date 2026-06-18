@@ -339,6 +339,12 @@ def run_simulation(config: dict) -> dict:
             if is_rain and compound not in ("INTER", "WET"):
                 rain_penalty = float(np.random.uniform(2.0, 5.5))
 
+            # Driver error — occasional lock-up / off-track moment. Independent
+            # per car so it adds unpredictability without destabilising the field.
+            driver_error = 0.0
+            if not in_sc and lap > 1 and random.random() < 0.012:
+                driver_error = float(np.random.uniform(0.4, 1.8))
+
             # Base lap time — scaled by team pace
             base_lap = 90.0 * car["pace"]
 
@@ -346,7 +352,7 @@ def run_simulation(config: dict) -> dict:
                 # SC: everyone drives slowly, gaps compress
                 lap_time = base_lap * 1.28 + float(np.random.normal(0, 0.3))
             else:
-                lap_time = base_lap + tyre_delta + rain_penalty + float(np.random.normal(0, 0.08))
+                lap_time = base_lap + tyre_delta + rain_penalty + driver_error + float(np.random.normal(0, 0.08))
 
             cum_times[car["id"]] += lap_time
 
@@ -385,6 +391,7 @@ def run_simulation(config: dict) -> dict:
                 "tyre_delta": round(tyre_delta, 4),
                 "pitting":    pitting,
                 "rain_pen":   round(rain_penalty, 3),
+                "error":      round(driver_error, 3),
             })
 
         # Sort by cumulative time to determine positions
@@ -394,6 +401,14 @@ def run_simulation(config: dict) -> dict:
         for i, car in enumerate(lap_cars):
             car["position"] = i + 1
             car["gap"]      = round(car["cum_time"] - leader_time, 3)
+            # Interval = gap to the car directly ahead (broadcast timing standard).
+            # DRS available when within 1.0s of the car ahead under green-flag racing.
+            if i == 0:
+                car["interval"] = 0.0
+                car["drs"]      = False
+            else:
+                car["interval"] = round(car["cum_time"] - lap_cars[i - 1]["cum_time"], 3)
+                car["drs"]      = (not in_sc) and lap > 2 and car["interval"] < 1.0
 
         lap_snapshots.append({
             "lap":          lap,
@@ -580,7 +595,31 @@ def api_simulate():
 # SECTION 4: ENTRY POINT
 # =============================================================================
 
+def _selftest():
+    """Quick invariant check on the simulation output. Run: python app.py --selftest"""
+    cfg = {"race_id": 5, "team": "McLaren", "grid_position": 2, "weather": "DRY",
+           "safety_car_expected": False,
+           "stints": [{"compound": "MEDIUM", "laps": 22}, {"compound": "HARD", "laps": 26},
+                      {"compound": "SOFT", "laps": 18}]}
+    r = run_simulation(cfg)
+    assert "error" not in r, r
+    assert len(r["laps"]) == 66, "lap count"
+    final = r["laps"][-1]["cars"]
+    assert [c["position"] for c in final] == list(range(1, 21)), "positions sequential"
+    assert final[0]["interval"] == 0.0 and not final[0]["drs"], "leader has no interval/DRS"
+    assert all(c["interval"] >= 0 for c in final), "intervals non-negative"
+    gaps = [c["gap"] for c in final]
+    assert gaps == sorted(gaps), "gaps ordered by position"
+    assert all(0 <= c["error"] <= 2.0 for snap in r["laps"] for c in snap["cars"]), "errors bounded"
+    print("selftest OK")
+
+
 if __name__ == "__main__":
+    import sys
+    if "--selftest" in sys.argv:
+        _selftest()
+        sys.exit(0)
+
     print("\n" + "=" * 55)
     print("  PITWALL · F1 Strategy Evaluator")
     print("  Starting Flask server...")

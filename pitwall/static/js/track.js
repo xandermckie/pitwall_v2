@@ -133,9 +133,15 @@ let currentSnap = null;        // Latest lap snapshot to render
 let carPositions = {};         // Smoothed {id: {x,y,tx,ty}} — current and target XY
 let lastFrameTime = 0;
 
-// Stable per-car track offsets — computed once per lap, not per frame
-// Prevents flickering from Math.random() being called inside the draw loop
-let carTrackOffsets = {};
+// ── Race circulation state ──────────────────────────────────────────────
+// Cars actually drive AROUND the track. A continuous "race phase" advances by
+// one lap each snapshot; the RAF loop eases the rendered phase toward it so the
+// field sweeps smoothly. Each car sits at phase minus its gap (in lap-fractions)
+// behind the leader — so on-track spacing reflects the real time gaps.
+const LAP_REF        = 92;   // seconds ≈ one full lap of track for gap→distance
+let   racePhaseTarget  = 0;  // laps completed (integer steps)
+let   racePhaseCurrent = 0;  // smoothed phase actually rendered
+let   focusedCarId     = null; // car the user clicked to follow (null = user cars)
 
 /**
  * Initialise the track canvas for a given circuit.
@@ -159,10 +165,16 @@ function trackInit(name) {
     }, 150);
   });
 
+  racePhaseTarget  = 0;
+  racePhaseCurrent = 0;
+
   buildScaledPath();
   bakeTrackBackground();
   startRafLoop();
 }
+
+/** Follow a specific car on track (clicked in the timing tower). null = user cars. */
+function trackSetFocus(id) { focusedCarId = id; }
 
 /** Match canvas pixel dimensions to its CSS display size */
 function resizeCanvas() {
@@ -293,7 +305,9 @@ function trackStop() {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   currentSnap = null;
   carPositions = {};
-  carTrackOffsets = {};
+  racePhaseTarget  = 0;
+  racePhaseCurrent = 0;
+  focusedCarId     = null;
 }
 
 /**
@@ -324,24 +338,19 @@ function trackPositionAt(t) {
 
 /**
  * trackDraw — Called by app.js each lap with new data.
- * Does NOT draw directly. Instead it:
- *   1. Stores the new snapshot as the render target
- *   2. Computes stable target positions for each car (no Math.random in RAF loop)
- *   3. Lets the RAF loop handle smooth rendering at 60fps
+ * Sets the render target and advances the race phase by one lap. The RAF loop
+ * eases the rendered phase toward the target so cars circulate smoothly; their
+ * on-track positions are derived from gap each frame (see renderFrame).
+ *
+ * `scrub` = true when the user drags the lap timeline — jump phase instantly
+ * (no easing animation) so scrubbing feels direct.
  */
-function trackDraw(lapSnap) {
+function trackDraw(lapSnap, scrub = false) {
   if (!lapSnap?.cars) return;
   currentSnap = lapSnap;
 
-  // Compute stable target track positions for this lap.
-  // Stored in carTrackOffsets so the RAF loop never calls Math.random().
-  lapSnap.cars.forEach(car => {
-    const gapFraction   = Math.min(car.gap / 90, 0.55);
-    const baseProgress  = 1.0 - gapFraction;
-    // One-time stable jitter per car per lap (not per frame)
-    const jitter        = (car.id * 0.00137) % 0.004;
-    carTrackOffsets[car.id] = (baseProgress + jitter) % 1;
-  });
+  racePhaseTarget = lapSnap.lap;
+  if (scrub) racePhaseCurrent = racePhaseTarget;
 }
 
 /**
@@ -366,88 +375,104 @@ function renderFrame() {
 
   if (!currentSnap?.cars || !scaledPath.length) return;
 
-  // ── Draw cars — reverse order so P1 renders on top ────────────────────
-  const cars = currentSnap.cars;
+  // ── Ease the rendered race phase toward the target lap ────────────────
+  // This is what makes the whole field sweep smoothly around the circuit.
+  racePhaseCurrent += (racePhaseTarget - racePhaseCurrent) * 0.12;
 
-  // Batch all non-user car circles in one path (huge perf win)
-  ctx.beginPath();
-  for (let i = cars.length - 1; i >= 0; i--) {
-    const car = cars[i];
-    if (car.is_user) continue;
-    const t   = carTrackOffsets[car.id] ?? 0;
-    const pos = trackPositionAt(t);
-    ctx.moveTo(pos.x + 5.5, pos.y);
-    ctx.arc(pos.x, pos.y, 5.5, 0, Math.PI * 2);
+  const cars      = currentSnap.cars;
+  const now       = performance.now();
+  const isHi      = car => car.is_user || car.id === focusedCarId;
 
-    // Cache position for label drawing
-    car._px = pos.x;
-    car._py = pos.y;
+  // Compute every car's on-track point from its gap behind the leader.
+  for (const car of cars) {
+    const t  = (((racePhaseCurrent - car.gap / LAP_REF) % 1) + 1) % 1;
+    const p  = trackPositionAt(t);
+    car._px = p.x; car._py = p.y;
   }
-  // Fill all rival cars at once
-  ctx.fillStyle = '#888'; // overridden per-car below, this is just for batching
-  ctx.fill();
 
-  // Re-fill with correct colours individually (still faster than separate paths)
+  // ── DRS battle links — faint line to the car ahead when within range ──
+  const byPos = {};
+  for (const car of cars) byPos[car.position] = car;
+  ctx.lineWidth = 1.5;
+  for (const car of cars) {
+    if (!car.drs) continue;
+    const ahead = byPos[car.position - 1];
+    if (!ahead) continue;
+    ctx.strokeStyle = 'rgba(57,181,74,0.55)';   // DRS green
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(car._px, car._py);
+    ctx.lineTo(ahead._px, ahead._py);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // ── Rival cars (not highlighted) ──────────────────────────────────────
   for (let i = cars.length - 1; i >= 0; i--) {
     const car = cars[i];
-    if (car.is_user || car._px === undefined) continue;
+    if (isHi(car)) continue;
     ctx.beginPath();
     ctx.arc(car._px, car._py, 5.5, 0, Math.PI * 2);
     ctx.fillStyle   = car.color;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth   = 1;
+    ctx.strokeStyle = car.drs ? 'rgba(57,181,74,0.9)' : 'rgba(255,255,255,0.2)';
+    ctx.lineWidth   = car.drs ? 1.6 : 1;
     ctx.stroke();
   }
 
-  // ── User cars — drawn last, on top, with glow ─────────────────────────
+  // ── Highlighted cars (your cars + followed car) — on top, with glow ───
   for (let i = cars.length - 1; i >= 0; i--) {
     const car = cars[i];
-    if (!car.is_user) continue;
+    if (!isHi(car)) continue;
+    const followed = car.id === focusedCarId;
 
-    const t   = carTrackOffsets[car.id] ?? 0;
-    const pos = trackPositionAt(t);
-    car._px = pos.x;
-    car._py = pos.y;
-
-    // Glow ring (cheap: no shadowBlur — use a slightly larger circle instead)
+    // Glow ring (cheap: larger translucent circle, no shadowBlur)
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 12, 0, Math.PI * 2);
+    ctx.arc(car._px, car._py, 12, 0, Math.PI * 2);
     ctx.fillStyle = car.color + '30';
     ctx.fill();
 
-    // Car body
+    // Body
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, 9, 0, Math.PI * 2);
+    ctx.arc(car._px, car._py, 9, 0, Math.PI * 2);
     ctx.fillStyle   = car.color;
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth   = 2;
     ctx.stroke();
+
+    // Followed car gets a pulsing white ring so it stands out from your cars
+    if (followed) {
+      const pulse = 14 + Math.sin(now / 200) * 2.5;
+      ctx.beginPath();
+      ctx.arc(car._px, car._py, pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+      ctx.lineWidth   = 1.5;
+      ctx.stroke();
+    }
 
     // Pit flash
     if (car.pitting) {
       ctx.beginPath();
-      ctx.arc(pos.x, pos.y, 15, 0, Math.PI * 2);
+      ctx.arc(car._px, car._py, 16, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(255,255,80,0.85)';
       ctx.lineWidth   = 2.5;
       ctx.stroke();
     }
   }
 
-  // ── Position labels — only top 5 + user cars ─────────────────────────
-  ctx.font      = '8px "Barlow Condensed"';
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#FFFFFF';
-
-  for (let i = 0; i < cars.length; i++) {
-    const car = cars[i];
-    if ((car.position > 5 && !car.is_user) || car._px === undefined) continue;
-    const r = car.is_user ? 9 : 5.5;
-    ctx.fillText(`P${car.position}`, car._px, car._py - r - 4);
+  // ── Position labels — top 5 + highlighted cars ────────────────────────
+  ctx.font         = 'bold 9px "Barlow Condensed"';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  for (const car of cars) {
+    if (car.position > 5 && !isHi(car)) continue;
+    const r = isHi(car) ? 9 : 5.5;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(`P${car.position}`, car._px, car._py - r - 7);
   }
-
-  ctx.textAlign = 'left';
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'alphabetic';
 
   // ── Lap counter overlay ───────────────────────────────────────────────
   if (currentSnap) {
